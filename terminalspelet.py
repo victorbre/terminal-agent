@@ -8,6 +8,7 @@ Innehållet i nivåerna ligger i levels.py.
 import atexit
 import json
 import os
+import random
 import re
 import shlex
 import shutil
@@ -135,9 +136,12 @@ RANKS = {
            "Process Hunter", "Scripter", "System Wizard", "Terminal Master"],
 }
 
-
-def rank_names():
-    return RANKS[LANG]
+# Rangerna efter Terminalmästare delas ut under kapitel 2 (fallen).
+CASE_RANKS = {
+    "sv": ["Utredare", "Kriminaltekniker", "Kommissarie"],
+    "en": ["Investigator", "Forensic Analyst", "Chief Inspector"],
+}
+CASE_PCT = [30, 65, 100]
 
 
 RANK_PCT = [0, 6, 16, 28, 42, 57, 72, 88, 100]
@@ -147,13 +151,30 @@ def max_xp():
     return sum(m["xp"] for lv in levels.LEVELS for m in lv["missions"])
 
 
+def rank_table():
+    """Namn och XP-gränser. Tutorialens nio ranger räknas på tutorialens XP,
+    fallens tre på fallens XP, så att ingen tappar rang när kapitel 2 läggs till."""
+    tut = sum(m["xp"] for lv in levels.LEVELS if not lv.get("case") for m in lv["missions"])
+    cas = sum(m["xp"] for lv in levels.LEVELS if lv.get("case") for m in lv["missions"])
+    names = list(RANKS[LANG])
+    limits = [tut * p / 100.0 for p in RANK_PCT]
+    if cas:
+        names += CASE_RANKS[LANG]
+        limits += [tut + cas * p / 100.0 for p in CASE_PCT]
+    return names, limits
+
+
+def rank_names():
+    return rank_table()[0]
+
+
 def rank_for(xp):
-    top = max_xp()
+    names, limits = rank_table()
     idx = 0
-    for i, pct in enumerate(RANK_PCT):
-        if xp >= top * pct / 100.0:
+    for i, lim in enumerate(limits):
+        if xp >= lim:
             idx = i
-    return idx, rank_names()[idx]
+    return idx, names[idx]
 
 
 # ---------------------------------------------------------------- säkerhetsvakt
@@ -317,6 +338,33 @@ def norm(s):
     return re.sub(r"[\s\"'`]", "", str(s)).casefold()
 
 
+UNITS = ("st", "rader", "rad", "filer", "fil", "minuter", "min", "kronor", "kr", "sek", "sekunder",
+         "rows", "row", "lines", "line", "files", "file", "minutes", "mins", "seconds", "secs")
+
+
+def soft(s):
+    """Tolerant form av ett svar: klockslag med punkt eller kolon, tusentalsavgränsare och enheter."""
+    s = str(s).strip().casefold()
+    s = re.sub(r"^(kl\.?|klockan|at)\s*", "", s)
+    s = re.sub(r"[.!]+$", "", s)
+    m = re.fullmatch(r"(\d{1,2})[.:](\d{2})(?:[.:](\d{2}))?", s)
+    if m:
+        return ":".join(x.zfill(2) for x in m.groups() if x is not None)
+    m = re.fullmatch(r"(\d{1,3}(?:[ ,.\u00a0]\d{3})+|\d+)\s*([a-zåäö]+)?", s)
+    if m and (m.group(2) is None or m.group(2) in UNITS):
+        return re.sub(r"\D", "", m.group(1))
+    return norm(s)
+
+
+def fill(g, s):
+    """Byter «nyckel» mot värdet från nivåns slumpade detaljer (g.S)."""
+    if callable(s):
+        s = s(g)
+    if not isinstance(s, str) or "«" not in s:
+        return s
+    return re.sub(r"«(\w+)»", lambda m: str(g.S.get(m.group(1), m.group(0))), s)
+
+
 class Game:
     def __init__(self, interactive=True, quiet=False):
         self.interactive = interactive
@@ -332,6 +380,7 @@ class Game:
         self.hints = 0
         self.sol_shown = False
         self.level_xp = 0
+        self.seed = 0
         self.data = {"name": None, "level": 0, "xp": 0, "done": 0}
         self.load()
         atexit.register(self.kill_procs)
@@ -394,9 +443,10 @@ class Game:
             except OSError:
                 pass
 
-    def start_level(self, idx):
+    def start_level(self, idx, seed=None):
         lv = levels.LEVELS[idx]
         self.wipe()
+        self.seed = seed if seed is not None else (random.randint(1, 999999) if self.interactive else 0)
         self.S = {}
         self.sh = Shell()
         self.sh.name = self.name
@@ -555,7 +605,12 @@ class Game:
     def intro(self, idx, lv):
         clear()
         n = len(levels.LEVELS)
-        rule(L("Nivå %d av %d: %s", "Level %d of %d: %s") % (idx + 1, n, lv["title"]), "═")
+        if lv.get("case"):
+            first = min(i for i, x in enumerate(levels.LEVELS) if x.get("case"))
+            cases = sum(1 for x in levels.LEVELS if x.get("case"))
+            rule(L("Fall %d av %d: %s", "Case %d of %d: %s") % (idx - first + 1, cases, lv["title"]), "═")
+        else:
+            rule(L("Nivå %d av %d: %s", "Level %d of %d: %s") % (idx + 1, n, lv["title"]), "═")
         print()
         say(lv["story"])
         print()
@@ -572,7 +627,7 @@ class Game:
         bar = "■" * mi + "□" * (total - mi)
         print()
         rule(L("Uppdrag %d av %d  %s", "Mission %d of %d  %s") % (mi + 1, total, bar))
-        say(m["text"])
+        say(fill(self, m["text"]))
         if m.get("ans") is not None:
             print(dim(L("  Svara med: svar <ditt svar>", "  Answer with: answer <your answer>")))
         print()
@@ -590,7 +645,7 @@ class Game:
                   ("hoppa", "spelet gör uppdraget åt dig (0 XP)"),
                   ("språk", "byt mellan svenska och engelska (nivån byggs om)"),
                   (":reset", "bygg om nivån och börja om"),
-                  ("sluta", "avsluta, nivån börjar om nästa gång")],
+                  ("sluta", "avsluta, du fortsätter där du slutade nästa gång")],
                  [("hint", "a tip, the first is free, more cost XP"),
                   ("goal", "show the mission again"),
                   ("answer X", "hand in an answer when the mission asks for one"),
@@ -601,7 +656,7 @@ class Game:
                   ("skip", "the game does the mission for you (0 XP)"),
                   ("lang", "switch between Swedish and English (the level is rebuilt)"),
                   (":reset", "rebuild the level and start over"),
-                  ("quit", "leave, the level restarts next time")])
+                  ("quit", "leave, next time you continue where you stopped")])
         for a, b in rows:
             print("  " + cyan(a.ljust(12)) + b)
         print()
@@ -646,27 +701,29 @@ class Game:
         print()
         head = green(L("  ✔ Klart", "  ✔ Done")) + (dim("  +%d XP" % xp) if xp else dim("  0 XP"))
         print(head)
-        say(m["after"], indent=4)
+        say(fill(self, m["after"]), indent=4)
         if up:
             print()
             print("  " + yellow(L("▲ Ny rang: %s", "▲ New rank: %s") % up))
 
     def answer_ok(self, m, given):
         exp = m["ans"](self) if callable(m["ans"]) else m["ans"]
-        exp = exp if isinstance(exp, (list, tuple)) else [exp]
+        exp = [fill(self, e) for e in (exp if isinstance(exp, (list, tuple)) else [exp])]
         g = norm(given)
         opts = set(norm(e) for e in exp)
         opts |= set(norm(os.path.basename(str(e))) for e in exp)
-        return g in opts or norm(os.path.basename(given.strip())) in opts
+        if g in opts or norm(os.path.basename(given.strip())) in opts:
+            return True
+        return soft(given) in set(soft(e) for e in exp)
 
     def sol_text(self, m):
         out = []
         for st in m["sol"]:
             if isinstance(st, tuple):
                 v = st[1](self) if callable(st[1]) else st[1]
-                out.append(L("svar %s", "answer %s") % v)
+                out.append(L("svar %s", "answer %s") % fill(self, v))
             else:
-                out.append(st)
+                out.append(fill(self, st))
         return out
 
     def read_line(self):
@@ -693,7 +750,7 @@ class Game:
             hs = m["hints"]
             n = min(self.hints, len(hs) - 1)
             print()
-            gus(hs[n])
+            gus(fill(self, hs[n]))
             self.hints += 1
             if n == len(hs) - 1:
                 print(dim(L("  Kör det fortfarande fast? `lösning` visar hela kommandot.",
@@ -728,8 +785,9 @@ class Game:
             for st in m["sol"]:
                 if isinstance(st, tuple):
                     v = st[1](self) if callable(st[1]) else st[1]
-                    print(dim(L("    (svaret är %s)", "    (the answer is %s)") % v))
+                    print(dim(L("    (svaret är %s)", "    (the answer is %s)") % fill(self, v)))
                 else:
+                    st = fill(self, st)
                     print("  " + self.prompt().replace("\001", "").replace("\002", "") + cyan(st))
                     self.execute(st)
             return "skip"
@@ -742,9 +800,10 @@ class Game:
             xp = self.data["xp"] + self.level_xp
             i, rk = rank_for(xp)
             say(L("Rang: %s. %d av %d XP.", "Rank: %s. %d of %d XP.") % (rk, xp, max_xp()))
-            if i + 1 < len(rank_names()):
-                need = int(max_xp() * RANK_PCT[i + 1] / 100.0 + 0.999)
-                say(L("Nästa rang, %s, ligger på %d XP.", "Next rank, %s, starts at %d XP.") % (rank_names()[i + 1], need))
+            names, limits = rank_table()
+            if i + 1 < len(names):
+                need = int(limits[i + 1] + 0.999)
+                say(L("Nästa rang, %s, ligger på %d XP.", "Next rank, %s, starts at %d XP.") % (names[i + 1], need))
         elif word == "sluta":
             return "quit"
         elif word == "reset":
@@ -812,14 +871,53 @@ class Game:
             if r in ("quit", "reset", "lang"):
                 return r
 
+    def replay(self, lv, upto):
+        """Bygger upp världen som den var efter uppdrag 1..upto genom att köra lösningarna tyst."""
+        was = self.quiet
+        self.quiet = True
+        try:
+            for m in lv["missions"][:upto]:
+                self.mh = []
+                for st in m["sol"]:
+                    if not isinstance(st, tuple):
+                        self.execute(fill(self, st))
+        finally:
+            self.quiet = was
+
     def play_level(self, idx):
+        restart_shown = False
+        resume = self.data.get("mission", 0) if self.data.get("seed") is not None else 0
         while True:
             lv = levels.LEVELS[idx]
-            self.start_level(idx)
+            if resume:
+                self.start_level(idx, self.data["seed"])
+                self.replay(lv, resume)
+                self.level_xp = self.data.get("level_xp", 0)
+            else:
+                self.start_level(idx)
+                self.data.update({"mission": 0, "level_xp": 0, "seed": self.seed})
+                self.save()
+            if lv.get("chapter") and not restart_shown:
+                clear()
+                rule(lv["chapter"][0], "█")
+                print()
+                say(lv["chapter"][1])
+                self.wait()
+            restart_shown = True
             self.intro(idx, lv)
+            if resume:
+                print()
+                gus(L("Du är tillbaka där du slutade: uppdrag %d av %d. Allt du gjort i fallet finns kvar.",
+                      "You are back where you left off: mission %d of %d. Everything you did is still there.")
+                    % (resume + 1, len(lv["missions"])))
             restart = False
             for mi, m in enumerate(lv["missions"]):
+                if mi < resume:
+                    continue
                 r = self.play_mission(lv, mi, m, idx)
+                if r == "done":
+                    self.data.update({"mission": mi + 1, "level_xp": self.level_xp})
+                    self.save()
                 if r == "quit":
                     return "quit"
                 if r in ("reset", "lang"):
@@ -831,6 +929,7 @@ class Game:
                         gus(L("Jag bygger om nivån. XP du fått i den här nivån nollas.",
                               "I am rebuilding the level. XP you earned in this level resets."))
                     restart = True
+                    resume = 0
                     break
             if not restart:
                 break
@@ -841,13 +940,18 @@ class Game:
                 pass
         self.data["xp"] += self.level_xp
         self.data["level"] = idx + 1
+        self.data.update({"mission": 0, "level_xp": 0, "seed": None})
         self.save()
         self.outro(idx, lv)
         return "ok"
 
     def outro(self, idx, lv):
         print()
-        rule(L("Nivå %d klar: %s", "Level %d complete: %s") % (idx + 1, lv["title"]), "═")
+        if lv.get("case"):
+            first = min(i for i, x in enumerate(levels.LEVELS) if x.get("case"))
+            rule(L("Fall %d klart: %s", "Case %d closed: %s") % (idx - first + 1, lv["title"]), "═")
+        else:
+            rule(L("Nivå %d klar: %s", "Level %d complete: %s") % (idx + 1, lv["title"]), "═")
         print()
         say(lv["outro"])
         print()
@@ -888,7 +992,7 @@ class Game:
             say(L("Du har redan klarat spelet. Vill du köra om det? Skriv ja, annars Enter.", "You have already finished the game. Play again? Type yes, otherwise Enter."))
             try:
                 if input("  > ").strip().lower() in ("ja", "j", "yes", "y"):
-                    self.data.update({"level": 0, "xp": 0})
+                    self.data.update({"level": 0, "xp": 0, "mission": 0, "level_xp": 0, "seed": None})
                     start = 0
                 else:
                     return
@@ -897,12 +1001,13 @@ class Game:
         for idx in range(start, n):
             if self.play_level(idx) == "quit":
                 print()
-                say(L("Vi ses. Nivån börjar om nästa gång du startar.", "See you. The level restarts next time you start."))
+                say(L("Vi ses. Nästa gång fortsätter du på det uppdrag du slutade på.",
+                      "See you. Next time you continue on the mission where you stopped."))
                 return
         self.finale()
 
 
-def selftest(lang="sv"):
+def selftest(lang="sv", seed=0):
     set_lang(lang)
     tmp = tempfile.mkdtemp(prefix="tspel")
     init_paths(tmp)
@@ -911,7 +1016,7 @@ def selftest(lang="sv"):
     bad = 0
     total = 0
     for li, lv in enumerate(levels.LEVELS):
-        g.start_level(li)
+        g.start_level(li, seed)
         for mi, m in enumerate(lv["missions"]):
             total += 1
             g.mh = []
@@ -926,13 +1031,14 @@ def selftest(lang="sv"):
             answered = None
             for st in m["sol"]:
                 if isinstance(st, tuple):
-                    v = st[1](g) if callable(st[1]) else st[1]
+                    v = fill(g, st[1](g) if callable(st[1]) else st[1])
                     answered = g.answer_ok(m, str(v)) if m.get("ans") is not None else None
                     wrong = g.answer_ok(m, "fel svar 12345") if m.get("ans") is not None else False
                     if wrong:
                         print("FEL %s accepterar fel svar" % label)
                         bad += 1
                 else:
+                    st = fill(g, st)
                     e = g.execute(st)
                     if e is None:
                         print("FEL %s blockerades av vakten: %s" % (label, st))
@@ -945,7 +1051,12 @@ def selftest(lang="sv"):
                     print("   undantag:", repr(e))
             else:
                 ok = bool(answered)
-            print("%s %s %s" % ("ok  " if ok else "FAIL", label, m["text"][:60].replace("\n", " ")))
+            for part in [m["text"], m["after"]] + list(m["hints"]) + [s for s in m["sol"] if isinstance(s, str)]:
+                left = fill(g, part)
+                if isinstance(left, str) and "«" in left:
+                    print("FEL %s har en okänd «nyckel»: %s" % (label, left[:60]))
+                    bad += 1
+            print("%s %s %s" % ("ok  " if ok else "FAIL", label, fill(g, m["text"])[:60].replace("\n", " ")))
             if not ok:
                 bad += 1
                 if g.last:
@@ -964,7 +1075,11 @@ def main():
         if k + 1 < len(sys.argv) and sys.argv[k + 1] in ("sv", "en"):
             lang = sys.argv[k + 1]
     if "--selftest" in sys.argv:
-        sys.exit(selftest(lang or "sv"))
+        seed = 0
+        if "--seed" in sys.argv:
+            k = sys.argv.index("--seed")
+            seed = int(sys.argv[k + 1])
+        sys.exit(selftest(lang or "sv", seed))
     init_paths(base)
     if "--nollstall" in sys.argv or "--reset" in sys.argv:
         try:

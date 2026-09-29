@@ -236,7 +236,7 @@ L1 = {
 
 
 def build2(g):
-    r = random.Random(2)
+    r = random.Random(2 * 1000003 + g.seed)
     W(g, "meddelande.txt",
       "Till: ny agent\nFrån: GUS\n\nVälkommen ombord. Projekt Norrsken har läckt.\n"
       "Jag har lagt loggar, rapporter och bilagor i din hemmapp.\n"
@@ -334,7 +334,7 @@ L2 = {
 
 
 def build3(g):
-    r = random.Random(3)
+    r = random.Random(3 * 1000003 + g.seed)
     W(g, "skrivbord/rapport_utkast.txt", "Utkast, ej klart.\n")
     W(g, "skrivbord/kvitto.txt", "Kvitto 2026-09-14: kaffebönor, 389 kr.\n")
     W(g, "skrivbord/slarv.txt", "Jag skulle ju flytta den här.\n")
@@ -412,7 +412,7 @@ L3 = {
 
 
 def build4(g):
-    r = random.Random(4)
+    r = random.Random(4 * 1000003 + g.seed)
     sw = lambda n: prose(r, n)
     W(g, "arkiv/2022/semester/resa.txt", sw(5) + "Vi såg norrsken i Abisko, det var fint.\n")
     W(g, "arkiv/2022/ekonomi/budget.txt", sw(9))
@@ -429,7 +429,7 @@ def build4(g):
     W(g, "notiser.md", "# Notiser\n" + sw(5))
     W(g, "kontor/serverrum/nod7.log", "INFO nod-7 startad\n")
     for y, seed in (("2024", 41), ("2025", 42)):
-        rr = random.Random(seed)
+        rr = random.Random(seed * 1000003 + g.seed)
         msgs = ["INFO  tjänst startad", "INFO  anslutning från 10.0.3.%d", "WARN  hög minnesanvändning",
                 "INFO  cache rensad", "ERROR anslutning nekad från 10.0.3.%d", "ERROR timeout mot databasen"]
         lines = []
@@ -507,7 +507,7 @@ L4 = {
 def build5(g):
     seed = 50
     while True:
-        r = random.Random(seed)
+        r = random.Random(seed * 1000003 + g.seed)
         seed += 1
         users = ["tnilsson", "mbergman", "akarlsson", "jekberg", "pwallin", "sholm", "okarlsson", "cdahl"]
         ips = ["10.0.3.%d" % i for i in range(11, 21)]
@@ -860,7 +860,7 @@ L8 = {
 
 
 def build9(g):
-    r = random.Random(9)
+    r = random.Random(9 * 1000003 + g.seed)
     for n in ("a_utkast", "b_bilaga", "c_notering", "d_moten", "e_agenda"):
         W(g, "dokument/%s.txt" % n, prose(r, 4))
     W(g, "plan.txt", "Lansering av Norrsken i oktober.\nBudget för Norrsken är låst.\nEndast styrelsen känner till Norrsken.\nAgenda följer.\n")
@@ -941,7 +941,7 @@ L9 = {
 
 
 def build10(g):
-    r = random.Random(10)
+    r = random.Random(10 * 1000003 + g.seed)
     users = ["tnilsson", "mbergman", "akarlsson", "jekberg", "pwallin", "sholm"]
     ips = ["10.0.3.%d" % i for i in range(11, 21)]
     auth = []
@@ -1017,3 +1017,9 @@ EPILOGUE = (
 )
 
 LEVELS = [L1, L2, L3, L4, L5, L6, L7, L8, L9, L10]
+
+# Kapitel 2 ligger i fall.py. Importen står sist eftersom fall.py hämtar hjälpfunktioner härifrån.
+import fall  # noqa: E402
+
+LEVELS = LEVELS + fall.CASES
+EPILOGUE = fall.EPILOGUE

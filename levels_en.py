@@ -127,7 +127,7 @@ L1 = {
 
 
 def build2(g):
-    r = random.Random(2)
+    r = random.Random(2 * 1000003 + g.seed)
     W(g, "message.txt",
       "To: new agent\nFrom: GUS\n\nWelcome aboard. Project Norrsken has leaked.\n"
       "I have put logs, reports and attachments in your home folder.\n"
@@ -303,7 +303,7 @@ L3 = {
 
 
 def build4(g):
-    r = random.Random(4)
+    r = random.Random(4 * 1000003 + g.seed)
     sw = lambda n: prose(r, n)
     W(g, "archive/2022/vacation/trip.txt", sw(5) + "We saw norrsken in Abisko, it was lovely.\n")
     W(g, "archive/2022/finance/budget.txt", sw(9))
@@ -320,7 +320,7 @@ def build4(g):
     W(g, "notes.md", "# Notes\n" + sw(5))
     W(g, "office/server_room/node7.log", "INFO node-7 started\n")
     for y, seed in (("2024", 41), ("2025", 42)):
-        rr = random.Random(seed)
+        rr = random.Random(seed * 1000003 + g.seed)
         msgs = ["INFO  service started", "INFO  connection from 10.0.3.%d", "WARN  high memory usage",
                 "INFO  cache cleared", "ERROR connection refused from 10.0.3.%d", "ERROR timeout to database"]
         lines = []
@@ -394,7 +394,7 @@ L4 = {
 def build5(g):
     seed = 50
     while True:
-        r = random.Random(seed)
+        r = random.Random(seed * 1000003 + g.seed)
         seed += 1
         users = ["tnilsson", "mbergman", "akarlsson", "jekberg", "pwallin", "sholm", "okarlsson", "cdahl"]
         ips = ["10.0.3.%d" % i for i in range(11, 21)]
@@ -747,7 +747,7 @@ L8 = {
 
 
 def build9(g):
-    r = random.Random(9)
+    r = random.Random(9 * 1000003 + g.seed)
     for n in ("a_draft", "b_attachment", "c_note", "d_meetings", "e_agenda"):
         W(g, "docs/%s.txt" % n, prose(r, 4))
     W(g, "plan.txt", "Launch of Norrsken in October.\nBudget for Norrsken is locked.\nOnly the board knows about Norrsken.\nAgenda follows.\n")
@@ -828,7 +828,7 @@ L9 = {
 
 
 def build10(g):
-    r = random.Random(10)
+    r = random.Random(10 * 1000003 + g.seed)
     users = ["tnilsson", "mbergman", "akarlsson", "jekberg", "pwallin", "sholm"]
     ips = ["10.0.3.%d" % i for i in range(11, 21)]
     auth = []
@@ -904,3 +904,9 @@ EPILOGUE = (
 )
 
 LEVELS = [L1, L2, L3, L4, L5, L6, L7, L8, L9, L10]
+
+# Chapter 2 lives in fall_en.py. The import comes last because fall_en.py pulls helpers from levels.
+import fall_en  # noqa: E402
+
+LEVELS = LEVELS + fall_en.CASES
+EPILOGUE = fall_en.EPILOGUE
